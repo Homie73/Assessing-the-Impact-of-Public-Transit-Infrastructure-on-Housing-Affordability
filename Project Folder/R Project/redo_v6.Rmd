@@ -1,0 +1,849 @@
+---
+title: 'URSP601: Final Project'
+authors: "Group 4"
+members: "Homayoon Aghili  - Insha Sheikh - Alexander Sklar"
+date: "2024-12-7"
+output:
+  html_document: default
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+options(repos = c(CRAN = "https://cloud.r-project.org"))
+```
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+# # Check renv status
+# renv::status()
+# 
+# # Restore the environment to match renv.lock
+# renv::restore()
+# 
+# # If you installed new packages and want to update renv.lock
+# renv::snapshot()
+# 
+# rmarkdown::render("redo_v2.Rmd")
+
+```
+
+
+#Step 1
+
+##Research Question: Has housing affordability (Median Rent Value) in block groups in the Purple Line corridor of Prince George's County, Maryland been negatively impacted by the Purple Line construction from 2018 and 2022 compared to 2013-2017 before the constructions began?
+
+##Hypothesis (H₁): Housing affordability (Median Rent Value) in block groups in the Purple Line corridor of Prince George's County, Maryland has significantly decreased (Median Rent 
+Value have increased) during the construction period (2018-2022) compared to the pre-construction period (2013-2017).
+
+##Null Hypothesis (H₀): There is no significant change in housing affordability (Median Rent Value) in block groups in the Purple Line corridor of Prince George's County, Maryland during the construction period (2018-2022) compared to the pre-construction period (2013-2017).
+
+#Step 2
+
+##Installing the neccessary Packages and Libraries.
+
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+# Installing necessary packages
+install.packages("tidycensus")
+install.packages("tidyverse")
+install.packages("writexl")
+install.packages("dplyr")
+install.packages("tmap")
+install.packages("tmaptools")
+install.packages("mice")
+install.packages("ggplot2")
+install.packages("survey")
+install.packages("broom")
+install.packages("car")
+install.packages("spdep")
+install.packages("spatialreg")
+install.packages("leaflet")
+install.packages("stargazer")
+install.packages("boot")
+install.packages("openxlsx")
+
+# Loading necessary libraries
+library(tidycensus)
+library(tidyverse)
+library(writexl)
+library(dplyr)
+library(tmap)
+library(tmaptools)
+library(mice)
+library(ggplot2)
+library(survey)
+library(broom)
+library(car)
+library(spdep)
+library(spatialreg)
+library(leaflet)
+library(stargazer)
+library(boot)
+library(openxlsx)
+```
+
+
+##Data Collection and Prepration
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+if (!requireNamespace("tidycensus", quietly = TRUE)) {
+  install.packages("tidycensus")
+}
+library(tidycensus)
+```
+
+
+###Setting the API Key.
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=TRUE}
+# Setting API key
+census_api_key("ac8cbcb5a5d9972a7b315a1e8ff4ad73dbae13b0", install = TRUE, overwrite=TRUE)
+
+```
+
+
+###Defining the variables We want to fetch.
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Defining selected variables
+selected_variables <- c(
+  "B01003_001", # Total Population
+  "B25064_001", # Median gross rent
+  "B25003_003", # Total renter-occupied units
+  "B25003_002", # Total owner-occupied units
+  "B19113_001", # Median Family Income in the Past 12 Months (in 2022 Inflation-Adjusted Dollars)
+  "B25077_001"  # Median Home Value (Dollars)
+)
+```
+
+
+###Fetching the ACS data.
+
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+options(timeout = 300) # Increase timeout to 180 seconds
+
+# Fetching ACS data for 2013-2017 and 2018-2022
+pg_data_2018_2022 <- get_acs(
+  geography = "block group",
+  variables = selected_variables,
+  year = 2022,
+  state = "MD",
+  county = "Prince George's",
+  survey = "acs5"
+)
+
+pg_data_2013_2017 <- get_acs(
+  geography = "block group",
+  variables = selected_variables,
+  year = 2017,
+  state = "MD",
+  county = "Prince George's",
+  survey = "acs5"
+)
+```
+
+
+###Importing the flagged shapefile.
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE, paged.print=TRUE}
+install.packages("sf")
+library(sf)
+
+# Specify the path to your shapefile (with forward slashes)
+shapefile_path <- "C:/University Data Base/Courses/Fall 2024/URSP605_Final Project/R Project/data_acquisition/CensusBlockGroups2020_PL_SVI.shp"
+
+# Import the selected block groups shapefile of Riverdale and New Carrollton
+pg_block_groups <- st_read(shapefile_path)
+
+# # Print the structure of the shapefile
+# print(pg_block_groups)
+# 
+shapefile_crs  <- st_crs(pg_block_groups)
+# print(shapefile_crs )
+
+```
+
+
+###Converting the data to wide format.
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Load tidyverse, which includes tidyr
+if (!requireNamespace("tidyverse", quietly = TRUE)) {
+  install.packages("tidyverse")  # Install if not installed
+}
+library(tidyverse)  # Load the tidyverse suite
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+# Converting pg_data_2018_2022 to wide format
+pg_data_2018_2022_wide <- pg_data_2018_2022 %>%
+  pivot_wider(
+    id_cols = GEOID,       # Each unique GEOID will remain as one row
+    names_from = variable, # Variables will become column names
+    values_from = estimate # Fill values with the estimates
+  )
+
+# Converting pg_data_2013_2017 to wide format
+pg_data_2013_2017_wide <- pg_data_2013_2017 %>%
+  pivot_wider(
+    id_cols = GEOID,       # Each unique GEOID will remain as one row
+    names_from = variable, # Variables will become column names
+    values_from = estimate # Fill values with the estimates
+  )
+
+```
+
+
+###Adding Margins of Error.
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Combine estimate and margin of error for each variable
+pg_data_2013_2017_wide <- pg_data_2013_2017 %>%
+  pivot_wider(names_from = variable, values_from = c(estimate, moe))
+
+pg_data_2018_2022_wide <- pg_data_2018_2022 %>%
+  pivot_wider(names_from = variable, values_from = c(estimate, moe))
+
+```
+
+
+###Renaming the Variables.
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Creating a named vector for renaming
+variable_mapping <- c(
+  "GEOID" = "GEOID20",
+  "estimate_B01003_001" = "Total Population",
+  "estimate_B25064_001" = "Median Gross Rent",
+  "estimate_B25003_003" = "Total Renter Occupied Units",
+  "estimate_B25003_002" = "Total Owner Occupied Units",
+  "estimate_B19113_001" = "Median Family Income",
+  "estimate_B25077_001" = "Median Home Value",
+  "moe_B01003_001" = "MOE Total Population",
+  "moe_B25064_001" = "MOE Median Gross Rent",
+  "moe_B25003_003" = "MOE Total Renter Occupied Units",
+  "moe_B25003_002" = "MOE Total Owner Occupied Units",
+  "moe_B19113_001" = "MOE Median Family Income",
+  "moe_B25077_001" = "MOE Median Home Value"
+)
+
+# Renaming columns in pg_data_2013_2017_wide
+pg_data_2013_2017_wide <- pg_data_2013_2017_wide %>%
+  rename_with(
+    ~ ifelse(.x %in% names(variable_mapping), variable_mapping[.x], .x),
+    everything()
+  )
+
+# Rename columns in pg_data_2018_2022_wide
+pg_data_2018_2022_wide <- pg_data_2018_2022_wide %>%
+  rename_with(
+    ~ ifelse(.x %in% names(variable_mapping), variable_mapping[.x], .x),
+    everything()
+  )
+
+```
+
+
+###Combining the two datasets.
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+# Combine ACS datasets
+combined_acs_wide <- full_join(
+  pg_data_2013_2017_wide, 
+  pg_data_2018_2022_wide, 
+  by = "GEOID20", 
+  suffix = c("_before", "_after")
+)
+
+```
+
+
+###Spatial joining the shapefile and the joined datasets.
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Ensure CRS match (assuming combined ACS doesn't have geometry)
+pg_block_groups <- st_transform(pg_block_groups, crs = 4326) # Adjust CRS as needed
+
+# Spatial join with the combined ACS data
+pg_block_groups_sjoined <- pg_block_groups %>%
+  left_join(combined_acs_wide, by = "GEOID20")
+
+# # Check the result
+# head(pg_block_groups_sjoined)
+```
+
+###Renaming the SVI data
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Creating a named vector for renaming
+variable_mapping_full <- c(
+  "E_TOTPOP" = "Total CT Population_before",
+  "E_TOTPOP_1" = "Total CT Population_after",
+  "EP_POV" = "Total Percentage of Persons Below Povert_before",
+  "EP_POV150" = "Total Percentage of Persons Below Povert_after",
+  "EP_UNEMP" = "Total Unemployment Rate_before",
+  "EP_UNEMP_1" = "Total Unemployment Rate_after",
+  "EP_MINRTY" = "Total Percentage Minority_before",
+  "EP_MINRT_1" = "Total Percentage Minority_after",
+  "M_TOTPOP" = "MOE Total CT Population_before",
+  "M_TOTPOP_1" = "MOE Total CT Population_after",
+  "MP_POV" = "MOE Total Percentage of Persons Below Povert_before",
+  "MP_POV150" = "MOE Total Percentage of Persons Below Povert_after",
+  "MP_UNEMP" = "MOE Total Unemployment Rate_before",
+  "MP_UNEMP_1" = "MOE Total Unemployment Rate_after",
+  "MP_MINRTY" = "MOE Total Percentage Minority_before",
+  "MP_MINRT_1" = "MOE Total Percentage Minority_after"
+)
+
+
+# Rename columns in pg_data_2018_2022_wide
+pg_block_groups_sjoined <- pg_block_groups_sjoined %>%
+  rename_with(
+    ~ ifelse(.x %in% names(variable_mapping_full), variable_mapping_full[.x], .x),
+    everything()
+  )
+
+```
+
+###Checking for missing values and imputing them using Predictive Mean Matching method.
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Check if the `mice` package is installed, and install if necessary
+if (!requireNamespace("mice", quietly = TRUE)) {
+  install.packages("mice")
+}
+library(mice)
+```
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Identify missing values
+summary(pg_block_groups_sjoined) # Identify columns with NAs
+
+# Select columns for imputation (numeric variables for MOE and estimates)
+impute_data <- pg_block_groups_sjoined %>%
+  select(
+    starts_with("Median"), 
+    starts_with("Total"),
+    starts_with("MOE"), 
+    starts_with("Value"), 
+    -geometry # Exclude geometry
+  )
+
+# Perform multiple imputations
+imputed <- mice(impute_data, m = 5, method = "pmm", seed = 123)
+
+# Check imputation results
+summary(imputed)
+
+# Extract the completed dataset from the imputed object
+completed_data <- complete(imputed)
+
+# Update the original data with imputed values
+pg_block_groups_sjoined <- pg_block_groups_sjoined %>%
+  mutate(across(
+    all_of(names(completed_data)),  # Ensure alignment of column names
+    ~ completed_data[[cur_column()]] # Replace with the imputed values
+  ))
+
+```
+
+###Defining the survay design to account for the varialbes' Margins of error.
+
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+# Check if the `survey` package is installed, and install if necessary
+if (!requireNamespace("survey", quietly = TRUE)) {
+  install.packages("survey")
+}
+library(survey)
+```
+
+###Converting the SVI variables to match the block group scale using population ratio.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Temporarily drop geometry
+pg_block_groups_data <- st_drop_geometry(pg_block_groups_sjoined)
+
+
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+# Ensure 'In_PG' is included in the selected data
+combined_data <- pg_block_groups_data %>%
+    select(GEOID20, starts_with("Median"), starts_with("Total"), starts_with("MOE"), Near_PL, In_PG) %>%
+    pivot_longer(
+        cols = -c(GEOID20, Near_PL, In_PG),
+        names_to = c(".value", "Period"),
+        names_pattern = "(.*)_(before|after)"
+    ) %>%
+    mutate(Period = factor(Period, levels = c("before", "after")))
+
+# Create indicators for treatment (Near_PL = 1) and post-treatment period
+combined_data <- combined_data %>%
+  mutate(
+    Treatment = ifelse(Near_PL == 1, 1, 0),
+    Post = ifelse(Period == "after", 1, 0)
+  )
+
+combined_data <- combined_data %>%
+  mutate(Interaction = Treatment * Post)
+
+# Add Total Population to Total CT Population ratio column
+combined_data <- combined_data %>%
+  mutate(Population_Ratio = `Total Population` / `Total CT Population`)
+
+
+# Add weights for each variable based on their MOE
+combined_data <- combined_data %>%
+  mutate(
+    `Total Population Weight` = 1 / (`MOE Total Population`^2),
+    `Median Gross Rent Weight` = 1 / (`MOE Median Gross Rent`^2),
+    `Total Renter Occupied Units Weight` = 1 / (`MOE Total Renter Occupied Units`^2),
+    `Total Owner Occupied Units Weight` = 1 / (`MOE Total Owner Occupied Units`^2),
+    `Median Family Income Weight` = 1 / (`MOE Median Family Income`^2),
+    `Median Home Value Weight` = 1 / (`MOE Median Home Value`^2),
+    `Total CT Population Weight` = 1 / (`MOE Total CT Population`^2),
+    `Total Percentage of Persons Below Povert Weight` = 1 / (`MOE Total Percentage of Persons Below Povert`^2),
+    `Total Unemployment Rate Weight` = 1 / (`MOE Total Unemployment Rate`^2),
+    `Total Percentage Minority Weight` = 1 / (`MOE Total Percentage Minority`^2)
+  )
+
+# Adjust variables to account for population ratios
+combined_data <- combined_data %>%
+  mutate(
+    `Total Unemployment Rate` = `Total Unemployment Rate` * Population_Ratio,
+    `Total Percentage of Persons Below Povert` = `Total Percentage of Persons Below Povert` * Population_Ratio,
+    `Total Percentage Minority` = `Total Percentage Minority` * Population_Ratio
+  )
+
+# Summary of the new columns
+summary(combined_data$Treatment)
+summary(combined_data$Post)
+
+
+```
+
+
+##Defining Survey Design
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Define survey designs for each variable
+survey_designs <- list(
+  `Total Population Design` = svydesign(
+    id = ~1,
+    data = combined_data,
+    weights = ~ `Total Population Weight`
+  ),
+  `Median Gross Rent Design` = svydesign(
+    id = ~1,
+    data = combined_data,
+    weights = ~ `Median Gross Rent Weight`
+  ),
+  `Total Renter Occupied Units Design` = svydesign(
+    id = ~1,
+    data = combined_data,
+    weights = ~ `Total Renter Occupied Units Weight`
+  ),
+  `Total Owner Occupied Units Design` = svydesign(
+    id = ~1,
+    data = combined_data,
+    weights = ~ `Total Owner Occupied Units Weight`
+  ),
+  `Median Family Income Design` = svydesign(
+    id = ~1,
+    data = combined_data,
+    weights = ~ `Median Family Income Weight`
+  ),
+  `Median Home Value Design` = svydesign(
+    id = ~1,
+    data = combined_data,
+    weights = ~ `Median Home Value Weight`
+  ),
+  `Total CT Population Design` = svydesign(
+    id = ~1,
+    data = combined_data,
+    weights = ~ `Total CT Population Weight`
+  ),
+  `Total Percentage of Persons Below Poverty Design` = svydesign(
+    id = ~1,
+    data = combined_data,
+    weights = ~ `Total Percentage of Persons Below Povert Weight`
+  ),
+  `Total Unemployment Rate Design` = svydesign(
+    id = ~1,
+    data = combined_data,
+    weights = ~ `Total Unemployment Rate Weight`
+  ),
+  `Total Percentage Minority Design` = svydesign(
+    id = ~1,
+    data = combined_data,
+    weights = ~ `Total Percentage Minority Weight`
+  )
+)
+
+# # Summarize each survey design
+# survey_design_summaries <- lapply(survey_designs, summary)
+# 
+# # Print summaries for inspection
+# survey_design_summaries
+
+combined_design <- svydesign(
+  id = ~1,
+  data = combined_data,
+  weights = ~`Median Gross Rent Weight`
+)
+```
+
+
+###Printing the summary of simple DiD results of each variable separately.
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+# Define a function for DiD analysis with variable names wrapped in backticks
+did_analysis <- function(variable_name, design) {
+  formula <- as.formula(paste0("`", variable_name, "` ~ Treatment + Period + Interaction"))
+  model <- svyglm(formula, design = design)
+  summary(model)
+}
+
+```
+
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+# Perform DiD analysis for key variables
+did_mfi <- did_analysis("Median Family Income", combined_design)
+did_tro <- did_analysis("Total Renter Occupied Units", combined_design)
+did_too <- did_analysis("Total Owner Occupied Units", combined_design)
+did_mhv <- did_analysis("Median Home Value", combined_design)
+did_mgr <- did_analysis("Median Gross Rent", combined_design)
+did_pmi <- did_analysis("Total Percentage Minority", combined_design)
+did_uem <- did_analysis("Total Unemployment Rate", combined_design)
+did_pov <- did_analysis("Total Percentage of Persons Below Povert", combined_design)
+
+# Print results
+list(
+  "Median Family Income" = did_mfi,
+  "Total Renter Occupied Units" = did_tro,
+  "Total Owner Occupied Units" = did_too,
+  "Median Home Value" = did_mhv,
+  "Median Gross Rent" = did_mgr,
+  "Total Percentage Minority" = did_pmi,
+  "Total Unemployment Rate" = did_uem,
+  "Total Percentage of Persons Below Poverty" = did_pov
+)
+```
+
+###Visualizing the summary results with faceted trend results.
+
+```{r echo=FALSE, message=FALSE, warning=FALSE}
+
+# Combine trend data for all variables into one long-format data frame
+trend_data_mfi <- combined_data %>%
+  group_by(Treatment, Period) %>%
+  summarize(
+    Mean = mean(`Median Family Income`, na.rm = TRUE),
+    SE = sd(`Median Family Income`, na.rm = TRUE) / sqrt(n()),
+    Variable = "MFI"
+  )
+
+trend_data_tro <- combined_data %>%
+  group_by(Treatment, Period) %>%
+  summarize(
+    Mean = mean(`Total Renter Occupied Units`, na.rm = TRUE),
+    SE = sd(`Total Renter Occupied Units`, na.rm = TRUE) / sqrt(n()),
+    Variable = "TRO"
+  )
+
+trend_data_too <- combined_data %>%
+  group_by(Treatment, Period) %>%
+  summarize(
+    Mean = mean(`Total Owner Occupied Units`, na.rm = TRUE),
+    SE = sd(`Total Owner Occupied Units`, na.rm = TRUE) / sqrt(n()),
+    Variable = "TOO"
+  )
+
+trend_data_mhv <- combined_data %>%
+  group_by(Treatment, Period) %>%
+  summarize(
+    Mean = mean(`Median Home Value`, na.rm = TRUE),
+    SE = sd(`Median Home Value`, na.rm = TRUE) / sqrt(n()),
+    Variable = "MHV"
+  )
+
+trend_data_mgr <- combined_data %>%
+  group_by(Treatment, Period) %>%
+  summarize(
+    Mean = mean(`Median Gross Rent`, na.rm = TRUE),
+    SE = sd(`Median Gross Rent`, na.rm = TRUE) / sqrt(n()),
+    Variable = "MGR"
+  )
+
+trend_data_pmi <- combined_data %>%
+  group_by(Treatment, Period) %>%
+  summarize(
+    Mean = mean(`Total Percentage Minority`, na.rm = TRUE),
+    SE = sd(`Total Percentage Minority`, na.rm = TRUE) / sqrt(n()),
+    Variable = "PMI"
+  )
+
+trend_data_uem <- combined_data %>%
+  group_by(Treatment, Period) %>%
+  summarize(
+    Mean = mean(`Total Unemployment Rate`, na.rm = TRUE),
+    SE = sd(`Total Unemployment Rate`, na.rm = TRUE) / sqrt(n()),
+    Variable = "UEM"
+  )
+
+trend_data_pov <- combined_data %>%
+  group_by(Treatment, Period) %>%
+  summarize(
+    Mean = mean(`Total Percentage of Persons Below Povert`, na.rm = TRUE),
+    SE = sd(`Total Percentage of Persons Below Povert`, na.rm = TRUE) / sqrt(n()),
+    Variable = "POV"
+  )
+
+
+# Bind the datasets together
+trend_data_combined <- bind_rows(trend_data_mfi, trend_data_tro, trend_data_tro, trend_data_mhv, trend_data_mgr, trend_data_pmi, trend_data_uem, trend_data_pov)
+
+ggplot(trend_data_combined, aes(x = Period, y = Mean, color = as.factor(Treatment), group = Treatment)) +
+  geom_line(size = 1.2) +
+  geom_point(size = 3) +
+  geom_errorbar(aes(ymin = Mean - SE, ymax = Mean + SE), width = 0.1) +
+  scale_color_manual(values = c("0" = "blue", "1" = "red"), labels = c("Control", "Treatment")) +
+  labs(
+    title = "Difference-in-Differences Assumption Verification",
+    x = "Period",
+    y = "Mean Value",
+    color = "Group"
+  ) +
+  facet_wrap(~ Variable, scales = "free_y", labeller = labeller(
+    Variable = c(
+      "MFI" = "Median Family Income",
+      "TRO" = "Renter Occupied Units",
+      "TOO" = "Owner Occupied Units",
+      "MHV" = "Median Home Value",
+      "MGR" = "Median Gross Rent",
+      "PMI" = "Percentage Minority",
+      "UEM" = "Unemployment Rate",
+      "POV" = "Below Poverty Percentage"
+    )
+  )) +
+  theme_minimal() +
+  theme(legend.position = "top")
+```
+
+##Deeper DiD Analysis
+
+```{r message=FALSE, warning=FALSE, include=FALSE}
+
+# Defining a function to run the DiD analysis for different variables while accounting for the control variables
+did_analysis_with_controls <- function(variable_name, design) {
+  formula <- as.formula(paste0("`", variable_name, "` ~ Treatment * Period + Treatment * In_PG + `Total Unemployment Rate` + `Total Renter Occupied Units` + `Median Family Income` + `Median Home Value` + `Total Percentage of Persons Below Povert` + `Total Percentage Minority` + `Total Owner Occupied Units` + `Total Population`"))
+  model <- svyglm(formula, design = design)
+  summary(model)
+}
+
+```
+
+
+```{r echo=TRUE, message=FALSE, warning=FALSE}
+
+# Running the analysis for Median Gross Rent
+did_mgr_results <- did_analysis_with_controls("Median Gross Rent", combined_design)
+print(did_mgr_results)
+```
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
+# Create a list of model summaries
+model_summaries <- list(
+  "MFI" = did_analysis_with_controls("Median Family Income", combined_design),
+  "TRO" = did_analysis_with_controls("Total Renter Occupied Units", combined_design),
+  "TOO" = did_analysis_with_controls("Total Owner Occupied Units", combined_design),
+  "MHV" = did_analysis_with_controls("Median Home Value", combined_design),
+  "MGR" = did_analysis_with_controls("Median Gross Rent", combined_design),
+  "PMI" = did_analysis_with_controls("Total Percentage Minority", combined_design),
+  "UEM" = did_analysis_with_controls("Total Unemployment Rate", combined_design),
+  "POV" = did_analysis_with_controls("Total Percentage of Persons Below Povert", combined_design)
+)
+
+print(model_summaries)
+```
+
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+# results <- list(
+#   "Median Family Income" = did_mfi,
+#   "Total Renter Occupied Units" = did_tro,
+#   "Total Owner Occupied Units" = did_too,
+#   "Median Home Value" = did_mhv,
+#   "Median Gross Rent" = did_mgr,
+#   "Total Percentage Minority" = did_pmi,
+#   "Total Unemployment Rate" = did_uem,
+#   "Total Percentage of Persons Below Poverty" = did_pov
+# )
+# 
+# library(writexl)
+# 
+# # Check the class of each object
+# lapply(results, class)
+# 
+# # Define a function to handle both `svyglm` and `summary.svyglm` objects
+# extract_summary <- function(model) {
+#   # If the model is already a summary, use it directly; otherwise, summarize it
+#   if (!inherits(model, "summary.svyglm")) {
+#     model <- summary(model)
+#   }
+#   
+#   # Extract coefficients into a tidy data frame
+#   data.frame(
+#     Term = rownames(model$coefficients),
+#     Estimate = model$coefficients[, "Estimate"],
+#     StdError = model$coefficients[, "Std. Error"],
+#     tValue = model$coefficients[, "t value"],
+#     PValue = model$coefficients[, "Pr(>|t|)"],
+#     row.names = NULL
+#   )
+# }
+# 
+# # Apply the function to each result
+# tidy_results <- lapply(results, extract_summary)
+# 
+# # Write the results to an Excel file
+# write_xlsx(tidy_results, "DiD_Results_Summary.xlsx")
+
+```
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+# library(openxlsx)
+# 
+# # Create a list of model summaries
+# model_summaries <- list(
+#   "MFI" = did_analysis_with_controls("Median Family Income", combined_design),
+#   "TRO" = did_analysis_with_controls("Total Renter Occupied Units", combined_design),
+#   "TOO" = did_analysis_with_controls("Total Owner Occupied Units", combined_design),
+#   "MHV" = did_analysis_with_controls("Median Home Value", combined_design),
+#   "MGR" = did_analysis_with_controls("Median Gross Rent", combined_design),
+#   "PMI" = did_analysis_with_controls("Total Percentage Minority", combined_design),
+#   "UEM" = did_analysis_with_controls("Total Unemployment Rate", combined_design),
+#   "POV" = did_analysis_with_controls("Total Percentage of Persons Below Povert", combined_design)
+# )
+# 
+# # Save results to Excel
+# wb <- createWorkbook()
+# for (name in names(model_summaries)) {
+#   addWorksheet(wb, name)
+#   if (!is.null(model_summaries[[name]])) {
+#     writeData(wb, name, as.data.frame(model_summaries[[name]]$coefficients))
+#   }
+# }
+# 
+# # Specify the path to save the workbook
+# saveWorkbook(wb, "DiD_Model_Summaries_Final.xlsx", overwrite = TRUE)
+
+```
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+
+# combined_data <- left_join(combined_data, pg_block_groups_sjoined %>% select(GEOID20, geometry), by = "GEOID20")
+# 
+# # Custom function to clean, truncate, and ensure unique column names
+# clean_truncate_unique <- function(col_names, max_length = 10) {
+#   # Replace non-alphanumeric characters with underscores
+#   cleaned_names <- gsub("[^A-Za-z0-9]", "_", col_names)
+#   # Truncate names to the specified maximum length
+#   truncated_names <- substr(cleaned_names, 1, max_length)
+#   # Ensure unique names by appending numeric suffixes if necessary
+#   make.unique(truncated_names)
+# }
+# 
+# # Apply the custom function to column names
+# colnames(combined_data) <- clean_truncate_unique(colnames(combined_data))
+# 
+# # Verify the updated column names
+# print(colnames(combined_data))
+# 
+# # Specify the path where you want to save the shapefile
+# output_path <- "C:/University Data Base/Courses/Fall 2024/URSP605_Final Project/R Project/data_acquisition/combined_data_final.shp"
+# 
+# # Export the sf object to a shapefile
+# st_write(combined_data, output_path, delete_layer = TRUE)
+# 
+# # Output a success message
+# cat("Shapefile successfully exported to:", output_path)
+```
+
+
+```{r eval=FALSE, message=FALSE, warning=FALSE, include=FALSE}
+# # Defining a function to run the DiD analysis for different variables while accounting for the control variables
+# did_analysis_with_controls_new <- function(variable_name, design) {
+#   formula <- as.formula(paste0("`", variable_name, "` ~ Treatment * Period + Treatment * In_PG + `Total Unemployment Rate` + `Total Renter Occupied Units` + `Median Family Income` + `Median Home Value` + `Total Percentage of Persons Below Povert` + `Total Percentage Minority` + `Total Owner Occupied Units` + `Total Population`"))
+#   model <- svyglm(formula, design = design)
+#   summary(model)
+# }
+# 
+# # Create a list of model summaries
+# model_summaries <- list(
+#   "MFI" = did_analysis_with_controls_new("Median Family Income", combined_design),
+#   "TRO" = did_analysis_with_controls_new("Total Renter Occupied Units", combined_design),
+#   "TOO" = did_analysis_with_controls_new("Total Owner Occupied Units", combined_design),
+#   "MHV" = did_analysis_with_controls_new("Median Home Value", combined_design),
+#   "MGR" = did_analysis_with_controls_new("Median Gross Rent", combined_design),
+#   "PMI" = did_analysis_with_controls_new("Total Percentage Minority", combined_design),
+#   "UEM" = did_analysis_with_controls_new("Total Unemployment Rate", combined_design),
+#   "POV" = did_analysis_with_controls_new("Total Percentage of Persons Below Povert", combined_design)
+# )
+# 
+# # Print the function (for reference)
+# print(did_analysis_with_controls_new)
+# 
+# library(openxlsx)
+# 
+# # Create a new workbook
+# wb <- createWorkbook()
+# 
+# # Loop through each model summary
+# for (name in names(model_summaries)) {
+#   # Add a worksheet for each controlled variable
+#   addWorksheet(wb, name)
+#   
+#   if (!is.null(model_summaries[[name]])) {
+#     # Extract coefficients as a data frame
+#     coefficients_df <- as.data.frame(model_summaries[[name]]$coefficients)
+#     
+#     # Extract row names (which correspond to the variables) as a new column
+#     coefficients_df <- cbind(
+#       `Controlled Variable` = rownames(coefficients_df),
+#       coefficients_df
+#     )
+#     
+#     # Reset row names after cbind
+#     rownames(coefficients_df) <- NULL
+#     
+#     # Write the updated data frame to the worksheet
+#     writeData(wb, name, coefficients_df, startCol = 1, startRow = 1)
+#   }
+# }
+# 
+# # Save the workbook
+# saveWorkbook(wb, "DiD_Model_Summaries_Final.xlsx", overwrite = TRUE)
+
+```
+
