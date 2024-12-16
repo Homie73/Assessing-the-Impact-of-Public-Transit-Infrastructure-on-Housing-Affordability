@@ -61,9 +61,9 @@ The DiD test results failed to reject the null hypothesis. Further analysis with
 2. **Tableau:**  
    - Developed a Tableau Story with interactive dashboards to showcase results.  
 
-[**Link to the Tableau Story**]()  
+[**Link to the Tableau Story**](https://github.com/Homie73/Assessing-the-Impact-of-Public-Transit-Infrastructure-on-Housing-Affordability/blob/main/Project%20Folder/Tableau/The%20Purple%20Line%20Corridor%20Case%20Study.twbx)  
 
-[**Link to the R Markdown**]()  
+[**Link to the R Markdown**](https://github.com/Homie73/Assessing-the-Impact-of-Public-Transit-Infrastructure-on-Housing-Affordability/blob/main/Project%20Folder/R%20Project/redo_v6.Rmd)  
 
 ---
 
